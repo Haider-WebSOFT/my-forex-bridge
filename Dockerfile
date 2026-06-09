@@ -5,14 +5,21 @@ ENV DEBIAN_FRONTEND=noninteractive \
     WINEPREFIX=/root/.wine \
     WINEDEBUG=-all 
 
-# Add 32-bit architecture, update, and install the complete 'wine' umbrella suite
-RUN dpkg --add-architecture i386 && \
-    apt-get update && \
-    apt-get install -y --no-install-recommends \
-    wget xvfb wine wine64 wine32 python3 python3-pip ca-certificates && \
+# Install dependencies, including software-properties-common to manage repositories safely
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    software-properties-common wget ca-certificates && \
+    dpkg --add-architecture i386 && \
+    apt-get update
+
+# Install the correct universal Wine integration binaries along with a virtual display frame
+RUN apt-get install -y --no-install-recommends \
+    xvfb \
+    wine-stable \
+    python3 \
+    python3-pip && \
     rm -rf /var/lib/apt/lists/*
 
-# Pre-initialize the Wine prefix silently using the virtual display
+# Pre-initialize Wine configurations quietly via the virtual display
 RUN xvfb-run -a wineboot --init
 
 WORKDIR /app
