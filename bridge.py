@@ -5,7 +5,7 @@ from mt5linux import MetaTrader5
 
 app = Flask(__name__)
 
-# Declare mt5 as global, but don't initialize it yet
+# Global MT5 Bridge Holder
 mt5 = None
 
 def init_mt5_bridge():
@@ -13,10 +13,8 @@ def init_mt5_bridge():
     global mt5
     print("⏳ Starting background Wine MT5 server bridge...")
     
-    # Try connecting to the internal bridge server up to 5 times
     for attempt in range(1, 6):
         try:
-            # We explicitly pass the initialization flag to kickstart the wine daemon
             mt5 = MetaTrader5()
             print("🚀 Internal mt5linux RPC bridge connected successfully!")
             return True
@@ -92,8 +90,40 @@ def place_trade():
 
     return jsonify({"status": "success", "ticket": result.order})
 
+
+@app.route('/history', methods=['GET'])
+def get_history():
+    """Fetches real historical candle charts directly from Exness MT5"""
+    if mt5 is None:
+        return jsonify({"error": "Bridge server is offline"}), 500
+
+    symbol = request.args.get('symbol', 'EURUSD')
+    timeframe = mt5.TIMEFRAME_M15 
+    
+    if not connect_to_exness():
+        return jsonify({"error": "MT5 Broker Authentication Failed"}), 500
+
+    print(f"📈 Extracting 1000 bars of M15 historical charts for {symbol}...")
+    rates = mt5.copy_rates_from_now(symbol, timeframe, 1000)
+    mt5.shutdown() # Shut down session immediately to prevent memory leak crashes
+
+    if rates is None or len(rates) == 0:
+        return jsonify({"error": "Failed to retrieve market history data or empty array returned"}), 400
+
+    # FIX: Safely parse the numpy structure array fields using index or dot property tags
+    try:
+        close_prices = [float(candle[4]) for candle in rates] # Index 4 is universally the 'close' value in MT5 arrays
+    except Exception as e:
+        # Fallback to property check if format changes based on your RPC library version
+        close_prices = [float(candle.close) for candle in rates]
+    
+    return jsonify({
+        "symbol": symbol, 
+        "closes": close_prices
+    })
+
+
 if __name__ == '__main__':
-    # Initialize the bridge server right before launching the web endpoints
     if init_mt5_bridge():
         port = int(os.environ.get("PORT", 5000))
         app.run(host='0.0.0.0', port=port)
