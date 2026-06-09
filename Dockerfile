@@ -1,24 +1,24 @@
 FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
-    PORT=5000
+    PORT=5000 \
+    WINEPREFIX=/root/.wine \
+    WINEDEBUG=-all 
 
-# Install dependencies, Wine emulator, and Python
 RUN dpkg --add-architecture i386 && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
-    wget xvfb xauth dbus-x11 supervisor \
-    wine64 wine32 ca-certificates python3 python3-pip && \
+    wget xvfb wine64 wine32 python3 python3-pip ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
+RUN xvfb-run -a wineboot --init
 
+WORKDIR /app
 COPY . /app
 
-# Install python dependencies
 RUN pip3 install --no-cache-dir -r requirements.txt
 
 EXPOSE 5000
 
-# Start a virtual display background layer and run our python gateway bridge
-CMD xvfb-run -a python3 bridge.py
+# Sleep for 3 seconds to let xvfb completely stabilize before executing python
+CMD xvfb-run --server-args="-screen 0 1024x768x16" sh -c "sleep 3 && python3 bridge.py"
