@@ -80,7 +80,9 @@ def place_trade():
 
     return jsonify({"status": "success", "ticket": result.order})
 
+# Accept both /history and /rates paths so bridgeClient.js links up perfectly
 @app.route('/history', methods=['GET'])
+@app.route('/rates', methods=['GET'])
 def get_history():
     global mt5
     
@@ -107,7 +109,6 @@ def get_history():
         count = 500
 
     # 3. Direct literal timeframes to ensure mt5linux handles them seamlessly
-    # Using explicit mt5linux frame ID numbers directly
     if timeframe_str == "M1":
         timeframe = 1
     elif timeframe_str == "M5":
@@ -138,14 +139,14 @@ def get_history():
     if rates is None or len(rates) == 0:
         return jsonify({
             "status": "error",
-            "error": f"Broker returned empty arrays for market asset symbol '{symbol}'. Ensure it is visible in MarketWatch."
+            "error": f"Broker returned empty arrays for market asset symbol '{symbol}'."
         }), 400
 
     # 6. Parse out records safely across tuple and object formats
     output_records = []
     for candle in rates:
         try:
-            # Try parsing as a standard dictionary/object structure
+            # Try parsing as standard object fields
             record = {
                 "time": int(candle.time),
                 "open": float(candle.open),
@@ -156,7 +157,7 @@ def get_history():
             }
         except Exception:
             try:
-                # Safe fallback to index notation for array tuples
+                # Safe fallback to raw index notation for arrays/tuples
                 record = {
                     "time": int(candle[0]),
                     "open": float(candle[1]),
@@ -173,9 +174,9 @@ def get_history():
         
         output_records.append(record)
 
-    
-
     return jsonify(output_records)
+    
+ 
 if __name__ == '__main__':
     # Flask boots up instantly with NO background MT5 calls. 
     # This prevents Railway from crashing during deployment!
