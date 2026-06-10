@@ -86,21 +86,50 @@ def get_history():
     if not safe_lazy_init():
         return jsonify({"error": "Failed to wake up and authorize MT5 engine"}), 500
 
-    symbol = request.args.get('symbol', 'EURUSD')
-    timeframe = mt5.TIMEFRAME_M15 
+    symbol = request.args.get('symbol', 'EURUSDm')
+    timeframe_str = request.args.get('timeframe', 'M15')
+    count = int(request.args.get('count', 500))
     
-    print(f"📈 Extracting 1000 bars of M15 data for {symbol}...")
-    rates = mt5.copy_rates_from_now(symbol, timeframe, 1000)
+    # Map incoming timeframe string to MT5 timeframe constants safely
+    timeframe = mt5.TIMEFRAME_M15
+    if timeframe_str == "M1": timeframe = mt5.TIMEFRAME_M1
+    elif timeframe_str == "M5": timeframe = mt5.TIMEFRAME_M5
+    elif timeframe_str == "M30": timeframe = mt5.TIMEFRAME_M30
+    elif timeframe_str == "H1": timeframe = mt5.TIMEFRAME_H1
+    
+    print(f"📈 Extracting {count} bars of {timeframe_str} data for {symbol}...")
+    rates = mt5.copy_rates_from_now(symbol, timeframe, count)
 
     if rates is None or len(rates) == 0:
-        return jsonify({"error": "Broker returned empty historical arrays"}), 400
+        return jsonify({"error": f"Broker returned empty historical arrays for {symbol}"}), 400
 
-    try:
-        close_prices = [float(candle[4]) for candle in rates] 
-    except Exception:
-        close_prices = [float(candle.close) for candle in rates]
+    output_records = []
     
-    return jsonify({"symbol": symbol, "closes": close_prices})
+    # Safely convert the structure whether it returns as an array of tuples or objects
+    for candle in rates:
+        try:
+            # If rates come back as an array of named tuples / objects
+            record = {
+                "time": int(candle.time),
+                "open": float(candle.open),
+                "high": float(candle.high),
+                "low": float(candle.low),
+                "close": float(candle.close),
+                "tick_volume": int(candle.tick_volume)
+            }
+        except AttributeError:
+            # Fallback if rates come back as raw indexed tuples
+            record = {
+                "time": int(candle[0]),
+                "open": float(candle[1]),
+                "high": float(candle[2]),
+                "low": float(candle[3]),
+                "close": float(candle[4]),
+                "tick_volume": int(candle[5])
+            }
+        output_records.append(record)
+
+    return jsonify(output_records)
 
 if __name__ == '__main__':
     # Flask boots up instantly with NO background MT5 calls. 
