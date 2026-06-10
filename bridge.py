@@ -82,6 +82,8 @@ def place_trade():
 
 @app.route('/history', methods=['GET'])
 def get_history():
+    global mt5
+    
     # 1. Initialize and log into the MT5 Engine dynamically
     try:
         if not safe_lazy_init():
@@ -97,34 +99,33 @@ def get_history():
 
     # 2. Extract query arguments with explicit fallbacks
     symbol = request.args.get('symbol', 'EURUSDm')
-    timeframe_str = request.args.get('timeframe', 'M15')
+    timeframe_str = str(request.args.get('timeframe', 'M15')).upper()
     
     try:
         count = int(request.args.get('count', 500))
     except ValueError:
         count = 500
 
-    # 3. Handle Timeframe conversion mapping explicitly
-    # Maps common string representations to standard MT5 integer constants
-    tf_upper = str(timeframe_str).upper()
-    if tf_upper == "M1":
+    # 3. Direct literal timeframes to ensure mt5linux handles them seamlessly
+    # Using explicit mt5linux frame ID numbers directly
+    if timeframe_str == "M1":
         timeframe = 1
-    elif tf_upper == "M5":
+    elif timeframe_str == "M5":
         timeframe = 5
-    elif tf_upper == "M15":
+    elif timeframe_str == "M15":
         timeframe = 15
-    elif tf_upper == "M30":
+    elif timeframe_str == "M30":
         timeframe = 30
-    elif tf_upper == "H1":
+    elif timeframe_str == "H1":
         timeframe = 16385
-    elif tf_upper == "H4":
+    elif timeframe_str == "H4":
         timeframe = 16388
     else:
         timeframe = 15 # Default safe fallback to M15
 
-    print(f"⚙️ Fetching history array: Symbol={symbol}, Timeframe={tf_upper}({timeframe}), Count={count}")
+    print(f"⚙️ Engine call: Symbol={symbol}, Timeframe={timeframe_str}({timeframe}), Count={count}")
 
-    # 4. Request the historical arrays from the broker terminal
+    # 4. Request historical arrays from the broker terminal safely
     try:
         rates = mt5.copy_rates_from_now(symbol, timeframe, count)
     except Exception as fetch_err:
@@ -140,11 +141,11 @@ def get_history():
             "error": f"Broker returned empty arrays for market asset symbol '{symbol}'. Ensure it is visible in MarketWatch."
         }), 400
 
-    # 6. Parse out historical records safely across tuple and object formats
+    # 6. Parse out records safely across tuple and object formats
     output_records = []
     for candle in rates:
         try:
-            # Handle standard named attribute objects
+            # Try parsing as a standard dictionary/object structure
             record = {
                 "time": int(candle.time),
                 "open": float(candle.open),
@@ -153,9 +154,9 @@ def get_history():
                 "close": float(candle.close),
                 "tick_volume": int(candle.tick_volume)
             }
-        except (AttributeError, TypeError, KeyError):
+        except Exception:
             try:
-                # Fallback for raw tuple index mapping if fields aren't named attributes
+                # Safe fallback to index notation for array tuples
                 record = {
                     "time": int(candle[0]),
                     "open": float(candle[1]),
@@ -171,6 +172,8 @@ def get_history():
                 }), 500
         
         output_records.append(record)
+
+    
 
     return jsonify(output_records)
 if __name__ == '__main__':
