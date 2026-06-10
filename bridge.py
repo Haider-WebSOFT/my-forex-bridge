@@ -82,33 +82,69 @@ def place_trade():
 
 @app.route('/history', methods=['GET'])
 def get_history():
-    # Initialize dynamically on request
-    if not safe_lazy_init():
-        return jsonify({"error": "Failed to wake up and authorize MT5 engine"}), 500
+    # 1. Initialize and log into the MT5 Engine dynamically
+    try:
+        if not safe_lazy_init():
+            return jsonify({
+                "status": "error", 
+                "error": "Failed to initialize or authorize the MT5 Wine client engine."
+            }), 500
+    except Exception as init_err:
+        return jsonify({
+            "status": "error", 
+            "error": f"Exception during lazy initialization: {str(init_err)}"
+        }), 500
 
+    # 2. Extract query arguments with explicit fallbacks
     symbol = request.args.get('symbol', 'EURUSDm')
     timeframe_str = request.args.get('timeframe', 'M15')
-    count = int(request.args.get('count', 500))
     
-    # Map incoming timeframe string to MT5 timeframe constants safely
-    timeframe = mt5.TIMEFRAME_M15
-    if timeframe_str == "M1": timeframe = mt5.TIMEFRAME_M1
-    elif timeframe_str == "M5": timeframe = mt5.TIMEFRAME_M5
-    elif timeframe_str == "M30": timeframe = mt5.TIMEFRAME_M30
-    elif timeframe_str == "H1": timeframe = mt5.TIMEFRAME_H1
-    
-    print(f"📈 Extracting {count} bars of {timeframe_str} data for {symbol}...")
-    rates = mt5.copy_rates_from_now(symbol, timeframe, count)
+    try:
+        count = int(request.args.get('count', 500))
+    except ValueError:
+        count = 500
 
+    # 3. Handle Timeframe conversion mapping explicitly
+    # Maps common string representations to standard MT5 integer constants
+    tf_upper = str(timeframe_str).upper()
+    if tf_upper == "M1":
+        timeframe = 1
+    elif tf_upper == "M5":
+        timeframe = 5
+    elif tf_upper == "M15":
+        timeframe = 15
+    elif tf_upper == "M30":
+        timeframe = 30
+    elif tf_upper == "H1":
+        timeframe = 16385
+    elif tf_upper == "H4":
+        timeframe = 16388
+    else:
+        timeframe = 15 # Default safe fallback to M15
+
+    print(f"⚙️ Fetching history array: Symbol={symbol}, Timeframe={tf_upper}({timeframe}), Count={count}")
+
+    # 4. Request the historical arrays from the broker terminal
+    try:
+        rates = mt5.copy_rates_from_now(symbol, timeframe, count)
+    except Exception as fetch_err:
+        return jsonify({
+            "status": "error", 
+            "error": f"Exception thrown during copy_rates_from_now: {str(fetch_err)}"
+        }), 500
+
+    # 5. Check if the broker returned valid data
     if rates is None or len(rates) == 0:
-        return jsonify({"error": f"Broker returned empty historical arrays for {symbol}"}), 400
+        return jsonify({
+            "status": "error",
+            "error": f"Broker returned empty arrays for market asset symbol '{symbol}'. Ensure it is visible in MarketWatch."
+        }), 400
 
+    # 6. Parse out historical records safely across tuple and object formats
     output_records = []
-    
-    # Safely convert the structure whether it returns as an array of tuples or objects
     for candle in rates:
         try:
-            # If rates come back as an array of named tuples / objects
+            # Handle standard named attribute objects
             record = {
                 "time": int(candle.time),
                 "open": float(candle.open),
@@ -117,20 +153,26 @@ def get_history():
                 "close": float(candle.close),
                 "tick_volume": int(candle.tick_volume)
             }
-        except AttributeError:
-            # Fallback if rates come back as raw indexed tuples
-            record = {
-                "time": int(candle[0]),
-                "open": float(candle[1]),
-                "high": float(candle[2]),
-                "low": float(candle[3]),
-                "close": float(candle[4]),
-                "tick_volume": int(candle[5])
-            }
+        except (AttributeError, TypeError, KeyError):
+            try:
+                # Fallback for raw tuple index mapping if fields aren't named attributes
+                record = {
+                    "time": int(candle[0]),
+                    "open": float(candle[1]),
+                    "high": float(candle[2]),
+                    "low": float(candle[3]),
+                    "close": float(candle[4]),
+                    "tick_volume": int(candle[5])
+                }
+            except Exception as parse_err:
+                return jsonify({
+                    "status": "error", 
+                    "error": f"Failed compiling structural candle indexes: {str(parse_err)}"
+                }), 500
+        
         output_records.append(record)
 
     return jsonify(output_records)
-
 if __name__ == '__main__':
     # Flask boots up instantly with NO background MT5 calls. 
     # This prevents Railway from crashing during deployment!
